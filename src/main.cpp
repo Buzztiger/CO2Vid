@@ -90,7 +90,7 @@ int new_interval       = 2;    // in seconds
 
 float current_temp    = 20.0f;
 float current_hum     = 50.0f;
-int current_CO2       = 0;
+float current_CO2     = 0.0f;
 int current_TVOC      = 0;
 int current_H2        = 0;
 int current_Ethanol   = 0;
@@ -206,16 +206,60 @@ float getBatteryVoltage(){     // Battery Voltage
   return b_volt;
 }
 
-void setLED(int CO2){
+float getBatteryPercent(){     // Battery Percent
+  
+    long sum      = 0;
+    float volt    = 0.0;
+    float bat_per = 0.0;
+    const float batt_max = 4.20;
+    const float batt_min = 3.7;
+
+    for (int i = 0; i < 100; i++)
+    {
+        sum += getBatteryVoltage();
+        delayMicroseconds(500);
+    }
+
+    volt = sum / (float)500;
+    volt = roundf(volt * 100) / 100; // rounding
+    Serial.print("volt: ");
+    Serial.println(volt, 2);
+    bat_per = ((volt - batt_min) / (batt_max - batt_min)) * 100;
+    if (bat_per < 100)
+        return bat_per;
+    else
+        return 100.0f;  
+}
+
+void setLED(float CO2){
+
+  float min = 400.0f;
+  float max = 2500.0f;
+
+  if( CO2 <= min ){  
+    CO2 = min;
+  }
+
+  if( CO2 >= max ){  
+    CO2 = max;
+  }
+
+  float n  = (CO2-min)/(max-min);
+  int hue  = (110.0f - n*110.0f);
+
+  leds[0] = CHSV( hue, 255, 255);
+  FastLED.show();
+
+  /*
   RED   = 0;
   GREEN = 0;
   BLUE  = 0;
+  
   if( CO2 < 400 ){  
     CO2 = 400;
   }
 
   if( CO2 < 700 ){                  // GREEN
-    //GREEN = 255;
     RED   = 0;
     BLUE  = 0;
     GREEN = 255;
@@ -231,19 +275,14 @@ void setLED(int CO2){
     RED   = 255;
     BLUE  = 0;
   }
-  //strip.setPixelColor(0, strip.Color(RED, GREEN, BLUE));
-  //Serial.println(GREEN);
-  //Serial.println(RED);
-  //Serial.println(BLUE);
-  leds[0] = CRGB(RED,GREEN,BLUE);
-  FastLED.show();
+  */
 }
 
 void setup() {
 
   // LED
   FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, LED_COUNT);
-  FastLED.setBrightness(64);
+  FastLED.setBrightness(255);
 
   // SD Card
   // Initialize SD card
@@ -712,5 +751,18 @@ char *ftoa( double f, char *a, int precision)
  itoa(desimal, a, 10);
  return ret;
 }
+  //strip.setPixelColor(0, strip.Color(RED, GREEN, BLUE));
+  //Serial.println(GREEN);
+  //Serial.println(RED);
+  //Serial.println(BLUE);
+  //leds[0] = CRGB(RED,GREEN,BLUE);
+  
+  //while(true){
+    
+  //  for (int hue = 110; hue >= 0; hue = hue - 1) { 
+//      leds[0] = CHSV( hue, 255, 255);
+  //    FastLED.show();
+   //   delay(50);
+  //  }
 
 */
