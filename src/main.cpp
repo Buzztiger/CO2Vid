@@ -25,14 +25,9 @@
 
 #include <FastLED.h>
 
-
-#define LED_PIN   21
+#define LED_PIN 21
 #define LED_COUNT 1
-
-
-#define DATA_PIN 21
-#define NUM_LEDS 1
-CRGB leds[NUM_LEDS];
+CRGB leds[LED_COUNT];
 
 // TODO
 // Bluetooth interface for reconfiguration
@@ -247,7 +242,7 @@ void setLED(int CO2){
 void setup() {
 
   // LED
-  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+  FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, LED_COUNT);
   FastLED.setBrightness(64);
 
   // SD Card
@@ -440,26 +435,8 @@ void loop()
     }else{
       alert = false;
     }
+
     setLED(current_CO2);
-
-    /*
-    if( current_CO2 < 700 ){                  // GREEN
-      strip.setPixelColor(0,255,0,0);
-      strip.show();
-      delay(1000);
-    }
-
-    if( (current_CO2 > 700) && (current_CO2 < 1000)){ // ORANGE
-      strip.setPixelColor(0,0,0,255);
-      strip.show();
-      delay(1000);
-    }
-    if(current_CO2 > 1000){                    // RED
-      strip.setPixelColor(0,0,255,0);
-      strip.show();
-      delay(1000);
-    }
-    */
 
     // Battery Voltage
     //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
@@ -735,22 +712,5 @@ char *ftoa( double f, char *a, int precision)
  itoa(desimal, a, 10);
  return ret;
 }
-
-  while(true)
-  {
-    strip.setBrightness(8);
-    strip.setPixelColor(0, strip.Color(255, 0, 0));    
-    strip.show();
-    delay(2000);
-    strip.setBrightness(8);
-    strip.setPixelColor(0, strip.Color(0, 255, 0));
-    strip.show();
-    delay(2000);
-    strip.setBrightness(8);
-    strip.setPixelColor(0, strip.Color(0, 0, 255));
-    strip.show();
-    delay(2000);
-    Serial.println("LED");
-  }
 
 */

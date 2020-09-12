@@ -1,2 +1,17 @@
 # CO2Vid
 CO2-based mobile monitor of human breath originated aerosols
+
+BOM
+==========================================
+1) Adafruit HUZZAH32 ESP32 Feather Board
+2) Adafruit NeoPixel Mini PCB
+3) Adafruit OLED
+4) Sensirion SCD30 Optical CO2 Sensor
+5) Sensirion SGP30 TVOC Sensor
+6) LiPo Battery
+
+PIN Connections
+==========================================
+NeoPixel In to ESP32 
+
+
