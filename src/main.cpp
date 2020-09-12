@@ -4,7 +4,6 @@
 #include <sys/time.h>
 #include <TimeLib.h>
 
-
 //#include <time.h>
 
 #include <Wire.h>
@@ -22,16 +21,30 @@
 // Display
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+//#include <Adafruit_NeoPixel.h>
+
+#include <FastLED.h>
+
+
+#define LED_PIN   21
+#define LED_COUNT 1
+
+
+#define DATA_PIN 21
+#define NUM_LEDS 1
+CRGB leds[NUM_LEDS];
 
 // TODO
-//   Bluetooth interface for reconfiguration
+// Bluetooth interface for reconfiguration
 
-//   Display
+// Display
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
-#define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_RESET    27 // Reset pin # (or -1 if sharing Arduino reset pin)
 
-//Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+//Adafruit_NeoPixel strip(1, LED_PIN, NEO_GRB + NEO_KHZ800);
+//Adafruit_NeoPixel strip(1, LED_PIN);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 File myFile;
 String buffer;
@@ -53,9 +66,13 @@ int  calibration_timer = 0;
 bool calibrated        = false;
 bool calibrating       = false;
 bool fresh_air         = true;
-int fresh_air_timer = 0;
-int fresh_air_time  = 0;  // Seconds under 500ppm
+bool startup           = true;
 
+int fresh_air_timer    = 0;
+int fresh_air_time     = 0;  // Seconds under 500ppm
+int RED   = 0;
+int GREEN = 0;
+int BLUE  = 0;
 int days = 0;
 int calibration_days = 0;
 
@@ -83,8 +100,14 @@ int current_TVOC      = 0;
 int current_H2        = 0;
 int current_Ethanol   = 0;
 
+uint16_t TVOC_base    = 0;
+uint16_t eCO2_base    = 0;
+
 const int array_length  = 128;  // Every 10 Seconds covers the last two minutes TODO check size in mem??
 const int plot_length   = 128;
+
+float batt_cor  = 0.14f;  // TODO calibrate this properly
+float batt_volt = 0;
 
 #define fan_pin 1          // Fan PIN -> transistor 5V line to fan
 const int plot_minimum = 300;   //
@@ -92,9 +115,9 @@ const int plot_minimum = 300;   //
 String data[array_length];       // Every 10 Seconds covers the last two minutes TODO check size in mem??
 int array_counter = 0;           // 
 
-int plot[128];    // 2m plot    
-int plot_6h[128]; // 6h plot  43200 points (@2s intervall) -> 337 points = 1px
-int plot_1h[128]; // 1h plot  7200  points (@2s intervall) -> 56 points  = 1px
+int plot[128];            // 2m plot    
+int plot_1h[128];         // 1h plot  7200  points (@2s intervall) -> 56 points  = 1px
+int plot_6h[128];         // 6h plot  43200 points (@2s intervall) -> 337 points = 1px
 int counter_6h = 0;       //337
 unsigned long sum_6h  = 0;
 int counter_1h = 0;       //56
@@ -108,13 +131,8 @@ String BTStringH = "";
 String BTStringL = "";
 String payload   = "";
 
-uint16_t TVOC_base = 0;
-uint16_t eCO2_base = 0;
-
-SCD30 airSensor;
-
-// TVOC Sensor
-Adafruit_SGP30 sgp;
+SCD30 airSensor;      // CO2 Sensor
+Adafruit_SGP30 sgp;   // TVOC Sensor
 
 /* return absolute humidity [mg/m^3] with approximation formula
 * @param temperature [°C]
@@ -126,7 +144,6 @@ uint32_t getAbsoluteHumidity(float temperature, float humidity) {
     const uint32_t absoluteHumidityScaled = static_cast<uint32_t>(1000.0f * absoluteHumidity); // [mg/m^3]
     return absoluteHumidityScaled;
 }
-
 
 // Write to the SD card (DON'T MODIFY THIS FUNCTION)
 void writeFile(fs::FS &fs, const char * path, const char * message) {
@@ -189,9 +206,51 @@ void set_time(String epoch_time2){
   settimeofday(tv, tz);
 }
 
-void setup() {
-  // SD Card
+float getBatteryVoltage(){     // Battery Voltage
+  float b_volt = (analogRead(A13)/4095.0f)*2.0f*3.30f*1.1f-batt_cor;
+  return b_volt;
+}
 
+void setLED(int CO2){
+  RED   = 0;
+  GREEN = 0;
+  BLUE  = 0;
+  if( CO2 < 400 ){  
+    CO2 = 400;
+  }
+
+  if( CO2 < 700 ){                  // GREEN
+    //GREEN = 255;
+    RED   = 0;
+    BLUE  = 0;
+    GREEN = 255;
+  }
+  if( (CO2 >= 700) && (CO2 < 1000)){ // ORANGE
+    
+    GREEN = 255;
+    RED   = 165;
+    BLUE  = 0;
+  }
+  if(CO2 >= 1000){                    // RED
+    GREEN = 0;
+    RED   = 255;
+    BLUE  = 0;
+  }
+  //strip.setPixelColor(0, strip.Color(RED, GREEN, BLUE));
+  //Serial.println(GREEN);
+  //Serial.println(RED);
+  //Serial.println(BLUE);
+  leds[0] = CRGB(RED,GREEN,BLUE);
+  FastLED.show();
+}
+
+void setup() {
+
+  // LED
+  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+  FastLED.setBrightness(64);
+
+  // SD Card
   // Initialize SD card
   /*
   SD.begin(SD_CS);  
@@ -209,6 +268,7 @@ void setup() {
     Serial.println("ERROR - SD card initialization failed!");
     return;    // init failed
   }
+  */
 
   // DISPLAY
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
@@ -228,9 +288,7 @@ void setup() {
   display.display();
   display.clearDisplay();
   display.setTextColor(1);
-  */
-
-
+  
   int epoch_time = 1599218222;
   setTime(epoch_time);
   Wire.begin();
@@ -256,13 +314,9 @@ void setup() {
 }
 
 void loop()
-{
-
-
-  /*
+{ 
 
   // Incoming command ----------------------------------------------------------------
- 
   if (SerialBT.available()){
     Serial.println("BT Data");
 
@@ -283,6 +337,7 @@ void loop()
     // Set/Get Time                    (T) T S/G 1599050020 epoch  
     // Switch  Fan                     (F) F0 off, F1 on
     // Get/Set plot_mode               (G) 0,1,2  live,1h,6h
+    // Get Battery Voltage             (B) , returns B:X.XX (e.g. B:3.7)
 
     // DATA    ========================
     if (cmnd1.equals("R")) {
@@ -292,11 +347,20 @@ void loop()
         delay(500);    // Do we need a delay here?
       }
     }
+    if (cmnd1.equals("B")) {
+      float batt_volt = getBatteryVoltage();
+      String batt = "B:" + String(batt_volt);
+      Serial.println(batt);
+      SerialBT.println(batt);
+    }
+
     if (cmnd1.equals("T")) {
       Serial.print("synctime: ");
       Serial.println(payload);
       set_time(payload);
     }
+
+
     /*
     if (cmnd1.equals("S")) {      // Read from SD Card and send via BT
       Serial.println("sd_card");            
@@ -310,10 +374,10 @@ void loop()
       while (myFile.available()) {
         buffer = myFile.readStringUntil('\n');
         Serial.println(buffer); //Printing for debugging purpose         
-      }
-   
+      }   
+    } */
 
-    } 
+    // SETTINGS ========================
     if (cmnd1.equals("P")) {
       Serial.print("pressure: ");
       Serial.println(payload);
@@ -341,6 +405,7 @@ void loop()
         Serial.println("Fan On");
       }
     }
+
     if (cmnd1.equals("G")) {
       Serial.print("intervall: ");
       Serial.println(payload);
@@ -357,12 +422,10 @@ void loop()
         Serial.println("6h Plot");
         plot_mode = 6;
       }      
-    }
-    // SETTINGS ========================
+    }    
   }
-  */
-
-  // CO2 Sensor
+  
+  // Air Sensors
   if (airSensor.dataAvailable())
   {
     current_CO2     = airSensor.getCO2();
@@ -370,12 +433,34 @@ void loop()
     current_hum     = airSensor.getHumidity();
     unsigned long t_stamp = (unsigned long) now();
     t_stamp               = t_stamp - time_offset;
-
+    
     if (current_CO2 > 999){
-      alert = true;      
+      alert = true;     
+       
     }else{
-      alert = false;      
+      alert = false;
     }
+    setLED(current_CO2);
+
+    /*
+    if( current_CO2 < 700 ){                  // GREEN
+      strip.setPixelColor(0,255,0,0);
+      strip.show();
+      delay(1000);
+    }
+
+    if( (current_CO2 > 700) && (current_CO2 < 1000)){ // ORANGE
+      strip.setPixelColor(0,0,0,255);
+      strip.show();
+      delay(1000);
+    }
+    if(current_CO2 > 1000){                    // RED
+      strip.setPixelColor(0,0,255,0);
+      strip.show();
+      delay(1000);
+    }
+    */
+
     // Battery Voltage
     //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
     
@@ -418,23 +503,22 @@ void loop()
   // TVOC Sensor
   // If you have a temperature / humidity sensor, you can set the absolute humidity to enable the humditiy compensation for the air quality signals
   //float temperature = 22.1; // [°C]
-  //float humidity = 45.2; // [%RH]
+  //float humidity    = 45.2; // [%RH]
   
   sgp.setHumidity(getAbsoluteHumidity(current_temp, current_hum));
 
   //sgp.getIAQBaseline(&eCO2_base, &TVOC_base);
   //sgp.setIAQBaseline(eCO2_baseline, TVOC_baseline);
 
-  if (sgp.IAQmeasure()) {
-    current_TVOC    = sgp.TVOC;
-  }
+    if (sgp.IAQmeasure()) {
+      current_TVOC    = sgp.TVOC;
+    }
 
-  if (sgp.IAQmeasureRaw()) {
-    current_H2      = sgp.rawH2;
-    current_Ethanol = sgp.rawEthanol;
-  }
+    if (sgp.IAQmeasureRaw()) {
+      current_H2      = sgp.rawH2;
+      current_Ethanol = sgp.rawEthanol;
+    }
 
-/*
     // Update Display ------------------------------------------------------------    
     display.clearDisplay();
     display.setTextSize(3);    
@@ -511,30 +595,15 @@ void loop()
     display.display();
 
     // Data string format
-    // L,epochtime,co2,temp,hum
-*/      
-    BTStringH = "H:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + "\r\n";
-    BTStringL = "L:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum);
+    // L,epochtime,co2,temp,hum,tvoc,h2,ethanol
+    
+    BTStringH = "H:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + ":" + String(current_TVOC) + ":" + String(current_H2) + ":" + String(current_Ethanol) + "\r\n";
+    BTStringL = "L:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + ":" + String(current_TVOC) + ":" + String(current_H2) + ":" + String(current_Ethanol); // + "\r\n";
 
     Serial.println(BTStringL);             // Send via serial connection Debug
-    //SerialBT.println(BTStringL);           // Send via BT TODO only if connection is available...
-
-    // Battery Voltage
-    //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
-    
-    // (2.05 / 3.3) = 0.62 * 4098 = 2540
-    //  V / 3.3 * 4098 = 2540
-
-    //float batt_volt = (analogRead(A13)/4095)*2*3.3*1.1;
-    float batt_cor  =  0.14f;
-    float batt_volt = (analogRead(A13)/4095.0f)*2.0f*3.30f*1.1f-batt_cor;
-
-    // (ADC.read(battery)/4095)*2*3.3*1.1;
-    //Serial.println(analogRead(A13));
-    Serial.println(batt_volt);    
-    //delay(2000 );
+    SerialBT.println(BTStringL);           // Send via BT TODO only if connection is available...
         
-/*
+   /*
     if(sd_card_storage){
       data[array_counter++] = BTStringH;     // Store to ringbuffer array
       if( array_counter >= array_length ){  // Store Ringbuffer to SD Card
@@ -543,6 +612,7 @@ void loop()
           appendArray(SD, "/data.txt", BTStringH.c_str());
       }
     }
+   */
 
   // Calibration Timers
   if(calibrating){
@@ -580,14 +650,24 @@ void loop()
     } 
        
   }
-*/  
 
-}
-}
+  }
+  
 
+ }
 
 // Archive --------------------------------------------------------------------------------------------------------------------
 /*
+    // (ADC.read(battery)/4095)*2*3.3*1.1;
+    //Serial.println(analogRead(A13));
+
+    //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
+    
+    // (2.05 / 3.3) = 0.62 * 4098 = 2540
+    //  V / 3.3 * 4098 = 2540
+
+    //float batt_volt = (analogRead(A13)/4095)*2*3.3*1.1;
+
  if (strcmp (topic,"sensors/scd30_2/set/pressure") == 0) {                               // Set pressure
       new_pressure = atoi(payload);      
       if(new_pressure > 1200) {
@@ -655,4 +735,22 @@ char *ftoa( double f, char *a, int precision)
  itoa(desimal, a, 10);
  return ret;
 }
+
+  while(true)
+  {
+    strip.setBrightness(8);
+    strip.setPixelColor(0, strip.Color(255, 0, 0));    
+    strip.show();
+    delay(2000);
+    strip.setBrightness(8);
+    strip.setPixelColor(0, strip.Color(0, 255, 0));
+    strip.show();
+    delay(2000);
+    strip.setBrightness(8);
+    strip.setPixelColor(0, strip.Color(0, 0, 255));
+    strip.show();
+    delay(2000);
+    Serial.println("LED");
+  }
+
 */
