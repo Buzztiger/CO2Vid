@@ -54,9 +54,9 @@ String buffer;
 bool sd_card_storage = false;
 bool alert = false;               // Above 1000 ppm?
 
-// Sensor Calibration TODO  -----------------------------------
+// Sensor Calibrations TODO  -----------------------------------
 
-/* When activated for the first time a
+/* SCD30 CO2 Sensor When activated for the first time a
 period of minimum 7 days is needed so that the algorithm can find its initial parameter set for ASC. The sensor has to be exposed
 to fresh air for at least 1 hour every day. 
 */ 
@@ -88,8 +88,7 @@ int calibration_days = 0;
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
 #endif
 
-// Bluetooth Serial object
-BluetoothSerial SerialBT;
+BluetoothSerial SerialBT;     // Bluetooth Serial object
 
 int new_pressure       = 1024; // in mbar
 int new_altitude       = 2;    // in meters
@@ -108,8 +107,11 @@ uint16_t eCO2_base    = 0;
 const int array_length  = 128;  // Every 10 Seconds covers the last two minutes TODO check size in mem??
 const int plot_length   = 128;
 
+// Battery 
 float batt_cor  = 0.14f;  // TODO calibrate this properly
 float batt_volt = 0;
+int batt_timer  = 0;
+bool low_batt
 
 #define fan_pin 1          // Fan PIN -> transistor 5V line to fan
 const int plot_minimum = 300;   //
@@ -357,6 +359,24 @@ void setup() {
 
 void loop()
 { 
+  // Battery Diagnostics ----------------------------------------------------------------
+  // check every n seconds
+  
+  if (){
+    // Battery Voltage
+    //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
+    
+    // (2.05 / 3.3) = 0.62 * 4098 = 2540
+    //  V / 3.3 * 4098 = 2540
+
+    //float batt_volt = (analogRead(A13)/4095)*2*3.3*1.1;
+    //float batt_volt = (1481.0f/4095.0f)*2.0f*3.30f*1.1f;
+
+    // (ADC.read(battery)/4095)*2*3.3*1.1;
+    //Serial.println(analogRead(A13));
+    //Serial.println(batt_volt);
+  }
+
   // Buttons pressed     ----------------------------------------------------------------
   for (int i = 0; i < NUM_BUTTONS; i++)  {    
     // Update the Bounce instance :
@@ -364,10 +384,13 @@ void loop()
     
     // If it fell, flag the need to toggle the LED
     if ( buttons[0].rose() ){
-        // Button0 Action
+        // Button0 Action   On/Off
+        // Sleep of wake up ESP32
+
     }
     if ( buttons[1].rose() ){
         // Button1 Action
+        // Switch Display Modes [CO2-Graph] [CLOCK] [BATTERY]
     }
     if ( buttons[2].rose() ){
         // Button2 Action
@@ -501,20 +524,7 @@ void loop()
       alert = false;
     }
 
-    setLED(current_CO2);
-
-    // Battery Voltage
-    //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
-    
-    // (2.05 / 3.3) = 0.62 * 4098 = 2540
-    //  V / 3.3 * 4098 = 2540
-
-    //float batt_volt = (analogRead(A13)/4095)*2*3.3*1.1;
-    //float batt_volt = (1481.0f/4095.0f)*2.0f*3.30f*1.1f;
-
-    // (ADC.read(battery)/4095)*2*3.3*1.1;
-    //Serial.println(analogRead(A13));
-    //Serial.println(batt_volt);
+    setLED(current_CO2); // Adjust LED to CO2 Level
 
     // Real time plot array
     memcpy(plot, &plot[1], sizeof(plot) - sizeof(int));    // Shift datapoints one down    
