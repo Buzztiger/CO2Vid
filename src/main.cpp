@@ -10,6 +10,7 @@
 #include <Adafruit_I2CDevice.h>
 #include "SparkFun_SCD30_Arduino_Library.h"
 #include "Adafruit_SGP30.h"
+#include <Bounce2.h>
 
 #include "BluetoothSerial.h"
 
@@ -41,6 +42,12 @@ CRGB leds[LED_COUNT];
 //Adafruit_NeoPixel strip(1, LED_PIN);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// Buttons
+#define NUM_BUTTONS 3
+const uint8_t BUTTON_PINS[NUM_BUTTONS] = {2, 3, 4};
+Bounce * buttons = new Bounce[NUM_BUTTONS];
+
+// SD Card
 File myFile;
 String buffer;
 
@@ -214,13 +221,14 @@ float getBatteryPercent(){     // Battery Percent
     const float batt_max = 4.20;
     const float batt_min = 3.7;
 
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < 100; i++) // TODO is this necessary?
     {
         sum += getBatteryVoltage();
         delayMicroseconds(500);
     }
 
     volt = sum / (float)500;
+
     volt = roundf(volt * 100) / 100; // rounding
     Serial.print("volt: ");
     Serial.println(volt, 2);
@@ -282,7 +290,7 @@ void setup() {
 
   // LED
   FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, LED_COUNT);
-  FastLED.setBrightness(255);
+  FastLED.setBrightness(10);
 
   // SD Card
   // Initialize SD card
@@ -349,8 +357,25 @@ void setup() {
 
 void loop()
 { 
+  // Buttons pressed     ----------------------------------------------------------------
+  for (int i = 0; i < NUM_BUTTONS; i++)  {    
+    // Update the Bounce instance :
+    buttons[i].update();
+    
+    // If it fell, flag the need to toggle the LED
+    if ( buttons[0].rose() ){
+        // Button0 Action
+    }
+    if ( buttons[1].rose() ){
+        // Button1 Action
+    }
+    if ( buttons[2].rose() ){
+        // Button2 Action
+    }
 
-  // Incoming command ----------------------------------------------------------------
+  }
+
+  // Incoming BT command ----------------------------------------------------------------
   if (SerialBT.available()){
     Serial.println("BT Data");
 
@@ -383,6 +408,8 @@ void loop()
     }
     if (cmnd1.equals("B")) {
       float batt_volt = getBatteryVoltage();
+      int   batt_pct  = getBatteryPercent();
+
       String batt = "B:" + String(batt_volt);
       Serial.println(batt);
       SerialBT.println(batt);
@@ -393,7 +420,6 @@ void loop()
       Serial.println(payload);
       set_time(payload);
     }
-
 
     /*
     if (cmnd1.equals("S")) {      // Read from SD Card and send via BT
@@ -522,8 +548,9 @@ void loop()
   //float humidity    = 45.2; // [%RH]
   
   sgp.setHumidity(getAbsoluteHumidity(current_temp, current_hum));
-
-  //sgp.getIAQBaseline(&eCO2_base, &TVOC_base);
+  
+  // TODO TVOC Baseline Management
+  //sgp.getIAQBaseline(&eCO2_base, &TVOC_base);     / Valid baseline after 12 hrs continuous operation
   //sgp.setIAQBaseline(eCO2_baseline, TVOC_baseline);
 
     if (sgp.IAQmeasure()) {
@@ -616,6 +643,8 @@ void loop()
     BTStringH = "H:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + ":" + String(current_TVOC) + ":" + String(current_H2) + ":" + String(current_Ethanol) + "\r\n";
     BTStringL = "L:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + ":" + String(current_TVOC) + ":" + String(current_H2) + ":" + String(current_Ethanol); // + "\r\n";
 
+    // Battery Level Reporting
+
     Serial.println(BTStringL);             // Send via serial connection Debug
     SerialBT.println(BTStringL);           // Send via BT TODO only if connection is available...
         
@@ -669,6 +698,8 @@ void loop()
 
   }
   
+
+
 
  }
 

@@ -9,6 +9,7 @@ BOM
 4) Sensirion SCD30 Optical CO2 Sensor
 5) Sensirion SGP30 TVOC Sensor
 6) LiPo Battery
+7) 3x Push Button
 
 PIN Connections
 ==========================================
