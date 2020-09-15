@@ -10,7 +10,6 @@
 #include <Adafruit_I2CDevice.h>
 #include "SparkFun_SCD30_Arduino_Library.h"
 #include "Adafruit_SGP30.h"
-#include <Bounce2.h>
 
 #include "BluetoothSerial.h"
 
@@ -43,9 +42,7 @@ CRGB leds[LED_COUNT];
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Buttons
-#define NUM_BUTTONS 3
-const uint8_t BUTTON_PINS[NUM_BUTTONS] = {2, 3, 4};
-Bounce * buttons = new Bounce[NUM_BUTTONS];
+// TODO Define 3 Touch buttons
 
 // SD Card
 File myFile;
@@ -53,6 +50,10 @@ String buffer;
 
 bool sd_card_storage = false;
 bool alert = false;               // Above 1000 ppm?
+
+String time_str = "";
+String date_str = "";
+unsigned long t_stamp;
 
 // Sensor Calibrations TODO  -----------------------------------
 
@@ -90,6 +91,7 @@ int calibration_days = 0;
 
 BluetoothSerial SerialBT;     // Bluetooth Serial object
 
+// Sensors
 int new_pressure       = 1024; // in mbar
 int new_altitude       = 2;    // in meters
 int new_interval       = 2;    // in seconds
@@ -107,14 +109,41 @@ uint16_t eCO2_base    = 0;
 const int array_length  = 128;  // Every 10 Seconds covers the last two minutes TODO check size in mem??
 const int plot_length   = 128;
 
+SCD30 airSensor;      // CO2 Sensor
+Adafruit_SGP30 sgp;   // TVOC Sensor
+
 // Battery 
-float batt_cor  = 0.14f;  // TODO calibrate this properly
-float batt_volt = 0;
-int batt_timer  = 0;
-bool low_batt
+const float batt_max = 4.2f;
+const float batt_min = 3.7f;
+int   batt_raw       = 0;
+float batt_volt      = 0;
+float batt_volt_old  = 0;
+int   batt_per       = 0;
+int batt_timer       = 0;
+int batt_hours_left  = 1;
+bool  batt_low       = false;
+String batt_status   = "unknown";  // Discharging, charging, unknown
 
 #define fan_pin 1          // Fan PIN -> transistor 5V line to fan
 const int plot_minimum = 300;   //
+
+// Touch Buttons
+unsigned int touch14_raw = 0;
+unsigned int touch15_raw = 0;
+bool touch0detected      = false;
+bool touch1detected      = false;
+const uint8_t threshold  = 40;
+const long touchDelay = 1000; //ms
+int value = 0;
+
+volatile unsigned long sinceLastTouchT0 = 0;
+volatile unsigned long sinceLastTouchT1 = 0;
+
+bool touchDelayComp(unsigned long);
+
+// Display
+int display_mode       = 2;         // 0: CO2     1: Clock     2: Battery
+bool display_update    = true;
 
 String data[array_length];       // Every 10 Seconds covers the last two minutes TODO check size in mem??
 int array_counter = 0;           // 
@@ -135,8 +164,15 @@ String BTStringH = "";
 String BTStringL = "";
 String payload   = "";
 
-SCD30 airSensor;      // CO2 Sensor
-Adafruit_SGP30 sgp;   // TVOC Sensor
+void IRAM_ATTR  gotTouch0(){ touch0detected = true; }
+
+void IRAM_ATTR  gotTouch1(){ touch1detected = true; }
+
+bool touchDelayComp(unsigned long lastTouch)
+{
+  if (millis() - lastTouch < touchDelay) return false;
+  return true;
+}
 
 /* return absolute humidity [mg/m^3] with approximation formula
 * @param temperature [°C]
@@ -210,39 +246,39 @@ void set_time(String epoch_time2){
   settimeofday(tv, tz);
 }
 
-float getBatteryVoltage(){     // Battery Voltage
-  float b_volt = (analogRead(A13)/4095.0f)*2.0f*3.30f*1.1f-batt_cor;
-  return b_volt;
-}
-
-float getBatteryPercent(){     // Battery Percent
-  
-    long sum      = 0;
-    float volt    = 0.0;
-    float bat_per = 0.0;
-    const float batt_max = 4.20;
-    const float batt_min = 3.7;
-
-    for (int i = 0; i < 100; i++) // TODO is this necessary?
-    {
-        sum += getBatteryVoltage();
+void batteryCheck(){
+    
+    batt_volt_old = batt_volt;        // Previous voltage    
+    for (int i = 0; i < 100; i++) {// TODO is this necessary? Averaging 
+        batt_raw += analogRead(A13);
         delayMicroseconds(500);
     }
+    batt_raw  = batt_raw / 100;
+    //batt_raw  = analogRead(A13);
+    batt_volt = (batt_raw + 142.7f)/635.44f;
+    batt_volt = roundf(batt_volt * 100) / 100; // rounding
+    
+    batt_per = ((batt_volt - batt_min) / (batt_max - batt_min)) * 100;
+    if (batt_per > 100) {
+      batt_per= 100;
+    }
+    if (batt_per < 0) {
+      batt_per= 0;
+    }
+    /*
+    Serial.print("Raw: ");
+    Serial.println(batt_raw, 2);
+    Serial.print("Volt: ");
+    Serial.println(batt_volt, 2);
+    Serial.print("Percent: ");
+    Serial.println(batt_per, 2);
+    */
+    // Check if charging
+    // Calc remaining time
 
-    volt = sum / (float)500;
-
-    volt = roundf(volt * 100) / 100; // rounding
-    Serial.print("volt: ");
-    Serial.println(volt, 2);
-    bat_per = ((volt - batt_min) / (batt_max - batt_min)) * 100;
-    if (bat_per < 100)
-        return bat_per;
-    else
-        return 100.0f;  
 }
-
+    
 void setLED(float CO2){
-
   float min = 400.0f;
   float max = 2500.0f;
 
@@ -259,40 +295,24 @@ void setLED(float CO2){
 
   leds[0] = CHSV( hue, 255, 255);
   FastLED.show();
-
-  /*
-  RED   = 0;
-  GREEN = 0;
-  BLUE  = 0;
-  
-  if( CO2 < 400 ){  
-    CO2 = 400;
-  }
-
-  if( CO2 < 700 ){                  // GREEN
-    RED   = 0;
-    BLUE  = 0;
-    GREEN = 255;
-  }
-  if( (CO2 >= 700) && (CO2 < 1000)){ // ORANGE
-    
-    GREEN = 255;
-    RED   = 165;
-    BLUE  = 0;
-  }
-  if(CO2 >= 1000){                    // RED
-    GREEN = 0;
-    RED   = 255;
-    BLUE  = 0;
-  }
-  */
 }
 
 void setup() {
-
+  
+  // Battery
+  batteryCheck();
+  batt_timer = millis();  // Start battery check timer
+ 
   // LED
   FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, LED_COUNT);
   FastLED.setBrightness(10);
+  
+  // Touch Buttons
+  //touch_pad_set_voltage()
+  //touch_pad_set_voltage;
+
+  touchAttachInterrupt(14, gotTouch0, threshold);
+  touchAttachInterrupt(15, gotTouch1, threshold);
 
   // SD Card
   // Initialize SD card
@@ -360,44 +380,86 @@ void setup() {
 void loop()
 { 
   // Battery Diagnostics ----------------------------------------------------------------
-  // check every n seconds
-  
-  if (){
-    // Battery Voltage
-    //Serial.printf("raw adc value No. %d: %d\n", i, analogRead(A13));
-    
-    // (2.05 / 3.3) = 0.62 * 4098 = 2540
-    //  V / 3.3 * 4098 = 2540
-
-    //float batt_volt = (analogRead(A13)/4095)*2*3.3*1.1;
-    //float batt_volt = (1481.0f/4095.0f)*2.0f*3.30f*1.1f;
-
-    // (ADC.read(battery)/4095)*2*3.3*1.1;
-    //Serial.println(analogRead(A13));
-    //Serial.println(batt_volt);
+  // check every 5 seconds TODO move this to interrupt handling
+  if ( (millis() - batt_timer) > 5000){
+    batt_timer = millis();
+    batteryCheck();
+    display_update = true;
   }
 
-  // Buttons pressed     ----------------------------------------------------------------
-  for (int i = 0; i < NUM_BUTTONS; i++)  {    
-    // Update the Bounce instance :
-    buttons[i].update();
-    
-    // If it fell, flag the need to toggle the LED
-    if ( buttons[0].rose() ){
+  // Buttons            ----------------------------------------------------------------
+  if (touch0detected){
+    touch0detected = false;
+    if (touchDelayComp(sinceLastTouchT0)){
+      sinceLastTouchT0 = millis();
+      display_update = true;
+      display_mode = display_mode - 1;
+      if (display_mode < 0){
+          display_mode = 2; 
+        }
+      if (display_mode > 2){
+        display_mode = 0; 
+      }
+    }
+  }
+
+  if (touch1detected){
+    touch1detected = false;
+    if (touchDelayComp(sinceLastTouchT1))
+    {
+      sinceLastTouchT1 = millis();
+      display_update = true;
+      display_mode = display_mode + 1;
+      if (display_mode < 0){
+          display_mode = 2; 
+        }
+      if (display_mode > 2){
+        display_mode = 0; 
+      }
+    }
+  }
+
+  /* #region Buttons */
+  /*
+  touch14_raw = 0;
+  touch15_raw = 0;
+
+  for (int i = 0; i < 50; i++) {// TODO is this necessary? Averaging 
+        touch14_raw += touchRead(14);
+        touch15_raw += touchRead(15);
+        delayMicroseconds(500);
+  }
+  touch14_raw = touch14_raw/50;
+  touch15_raw = touch15_raw/50;
+  // Button1 Action
+  if (touch14_raw < 20){
+    display_mode = display_mode - 1;
+  }
+  // Button2 Action
+  if (touch15_raw < 20){
+    display_mode = display_mode + 1;
+  }
+  if (display_mode < 0){
+    display_mode = 2; 
+  }
+  if (display_mode > 2){
+    display_mode = 0; 
+  }
+  */
+  // touch6 ->   GPIO14
+  // touch9 ->   GPIO32
+
+  //Serial.println(touchRead(14));
+  //Serial.println(touchRead(15));
         // Button0 Action   On/Off
-        // Sleep of wake up ESP32
-
-    }
-    if ( buttons[1].rose() ){
-        // Button1 Action
-        // Switch Display Modes [CO2-Graph] [CLOCK] [BATTERY]
-    }
-    if ( buttons[2].rose() ){
+            // Sleep of wake up ESP32
+       
+        // Button1 Action              0           1       2
+            // Switch Display Modes [CO2-Graph] [CLOCK] [BATTERY]
         // Button2 Action
-    }
-
-  }
-
+  /* #endregion */
+  
+  
   // Incoming BT command ----------------------------------------------------------------
   if (SerialBT.available()){
     Serial.println("BT Data");
@@ -430,12 +492,10 @@ void loop()
       }
     }
     if (cmnd1.equals("B")) {
-      float batt_volt = getBatteryVoltage();
-      int   batt_pct  = getBatteryPercent();
-
-      String batt = "B:" + String(batt_volt);
-      Serial.println(batt);
-      SerialBT.println(batt);
+      batteryCheck();    
+      String msg = "B:" + String(batt_volt) + ":" + String(batt_per);
+      Serial.println(msg);
+      SerialBT.println(msg);
     }
 
     if (cmnd1.equals("T")) {
@@ -514,8 +574,8 @@ void loop()
     current_CO2     = airSensor.getCO2();
     current_temp    = airSensor.getTemperature();
     current_hum     = airSensor.getHumidity();
-    unsigned long t_stamp = (unsigned long) now();
-    t_stamp               = t_stamp - time_offset;
+    t_stamp         = (unsigned long) now();
+    t_stamp         = t_stamp - time_offset;
     
     if (current_CO2 > 999){
       alert = true;     
@@ -572,80 +632,7 @@ void loop()
       current_Ethanol = sgp.rawEthanol;
     }
 
-    // Update Display ------------------------------------------------------------    
-    display.clearDisplay();
-    display.setTextSize(3);    
-    if(alert){
-      display.setCursor(7,40); // Adjust this location depending on above or below 1000 TODO
-      display.print("!");
-      display.setCursor(29,40); // Adjust this location depending on above or below 1000 TODO
-      display.print(current_CO2);
-      display.setCursor(105,55);
-      display.setTextSize(1);
-      display.print("ppm");
-      scaling_factor = 0.007;
-    }else{
-      display.setCursor(39,40); // Adjust this location depending on above or below 1000 TODO
-      display.print(current_CO2);
-      display.setCursor(100,55);
-      display.setTextSize(1);
-      display.print("ppm");
-      scaling_factor = 0.05;
-    }
-    // Graph two modes: OK <1000 ALERT > 1000ppm
-
-    // OK Mode < 1000 ppm
-    // Graph height 300-1000 = 700 ppm = 35 px    scaling_factor = 0.05
-
-    // ALERT Mode > 1000 ppm
-    // Graph height 300-5000 = 4700 ppm = 35 px   scaling_factor = 0.007
-    // 1000 ppm at  5px
-
-    //display.drawFastHLine(0, 35, 127,1);   // X-Axis
-    //display.drawFastHLine(0, 35, 127,1); // 1000-Marker 
-    //                        x   y   l
-    //display.drawFastVLine(5,  35 - 10, 10,1);   // 500 ppm  500  - 300 = 200 *0.05 = 10
-    //display.drawFastVLine(10, 35 - 35, 35,1);   //1000 ppm  1000 - 300 = 700 *0.05 = 35
-    //display.drawFastVLine(15, 35 -  0,  0,1);   // 300 ppm             = 0
-    
-    // Plot
-    if(plot_mode == 0) {       // Live Plot
-      for (byte i = 0; i < plot_length; i = i + 1) {                      
-        int l    = round( (plot[i]-plot_minimum) *scaling_factor);
-        if (l>35){
-          l = 35; }
-        int ypos = 35 - l;
-        if(l>0){
-          display.drawFastVLine(i, ypos, l,1);
-        }      
-      }
-    }
-  
-    if(plot_mode == 1) {       // 1h Plot
-      Serial.println("1h Plot");
-      for (byte i = 0; i < plot_length; i = i + 1) {                
-        int l    = round((plot_1h[i]-plot_minimum)*scaling_factor);
-        if (l>35){ l = 35; }
-        int ypos = 35 - l;
-        if(l>0){
-          display.drawFastVLine(i, ypos, l,1);
-        }      
-      }
-    }
-
-    if(plot_mode == 6) {       // 6h Plot
-      Serial.println("6h Plot");
-      for (byte i = 0; i < plot_length; i = i + 1) {                
-        int l    = round((plot_6h[i]-plot_minimum)*scaling_factor);
-        if (l>35){ l = 35; }
-        int ypos = 35 - l;
-        if(l>0){
-          display.drawFastVLine(i, ypos, l,1);
-        }      
-      }
-    }    
-   
-    display.display();
+    display_update = true;
 
     // Data string format
     // L,epochtime,co2,temp,hum,tvoc,h2,ethanol
@@ -654,9 +641,8 @@ void loop()
     BTStringL = "L:" + String(t_stamp) + ":" + String(current_CO2) + ":" + String(current_temp) + ":" + String(current_hum) + ":" + String(current_TVOC) + ":" + String(current_H2) + ":" + String(current_Ethanol); // + "\r\n";
 
     // Battery Level Reporting
-
-    Serial.println(BTStringL);             // Send via serial connection Debug
-    SerialBT.println(BTStringL);           // Send via BT TODO only if connection is available...
+    //Serial.println(BTStringL);             // Send via serial connection Debug
+    //SerialBT.println(BTStringL);           // Send via BT TODO only if connection is available...
         
    /*
     if(sd_card_storage){
@@ -669,7 +655,7 @@ void loop()
     }
    */
 
-  // Calibration Timers
+  // Calibration Timers for CO2 and TVOC Sensors
   if(calibrating){
     if ( (current_CO2 < 500) && (!fresh_air)) {
       fresh_air_timer = millis(); // Start timer
@@ -708,11 +694,132 @@ void loop()
 
   }
   
+  // Display [clock] [battery] [CO2] []
+  if(display_update){
+    display.clearDisplay();
+    switch (display_mode){
+      //-------------------------------------------------------------------------- 
+      /* #region CO2 */
+      case 0:     
+        display.setTextSize(3);    
+        if(alert){
+          display.setCursor(7,40); // Adjust this location depending on above or below 1000 TODO
+          display.print("!");
+          display.setCursor(29,40); // Adjust this location depending on above or below 1000 TODO
+          display.print(current_CO2);
+          display.setCursor(105,55);
+          display.setTextSize(1);
+          display.print("ppm");
+          scaling_factor = 0.007;
+        }else{
+          display.setCursor(39,40); // Adjust this location depending on above or below 1000 TODO
+          display.print(current_CO2);
+          display.setCursor(100,55);
+          display.setTextSize(1);
+          display.print("ppm");
+          scaling_factor = 0.05;
+        }
+        // Graph two modes: OK <1000 ALERT > 1000ppm
 
+        // OK Mode < 1000 ppm
+        // Graph height 300-1000 = 700 ppm = 35 px    scaling_factor = 0.05
 
+        // ALERT Mode > 1000 ppm
+        // Graph height 300-5000 = 4700 ppm = 35 px   scaling_factor = 0.007
+        // 1000 ppm at  5px
 
+        //display.drawFastHLine(0, 35, 127,1);   // X-Axis
+        //display.drawFastHLine(0, 35, 127,1); // 1000-Marker 
+        //                        x   y   l
+        //display.drawFastVLine(5,  35 - 10, 10,1);   // 500 ppm  500  - 300 = 200 *0.05 = 10
+        //display.drawFastVLine(10, 35 - 35, 35,1);   //1000 ppm  1000 - 300 = 700 *0.05 = 35
+        //display.drawFastVLine(15, 35 -  0,  0,1);   // 300 ppm             = 0
+        
+        // Plot
+        if(plot_mode == 0) {       // Live Plot
+          for (byte i = 0; i < plot_length; i = i + 1) {                      
+            int l    = round( (plot[i]-plot_minimum) *scaling_factor);
+            if (l>35){
+              l = 35; }
+            int ypos = 35 - l;
+            if(l>0){
+              display.drawFastVLine(i, ypos, l,1);
+            }      
+          }
+        }
+      
+        if(plot_mode == 1) {       // 1h Plot
+          Serial.println("1h Plot");
+          for (byte i = 0; i < plot_length; i = i + 1) {                
+            int l    = round((plot_1h[i]-plot_minimum)*scaling_factor);
+            if (l>35){ l = 35; }
+            int ypos = 35 - l;
+            if(l>0){
+              display.drawFastVLine(i, ypos, l,1);
+            }      
+          }
+        }
+
+        if(plot_mode == 6) {       // 6h Plot
+          Serial.println("6h Plot");
+          for (byte i = 0; i < plot_length; i = i + 1) {                
+            int l    = round((plot_6h[i]-plot_minimum)*scaling_factor);
+            if (l>35){ l = 35; }
+            int ypos = 35 - l;
+            if(l>0){
+              display.drawFastVLine(i, ypos, l,1);
+            }      
+          }
+        }          
+        break;
+        /* #endregion */
+      //-------------------------------------------------------------------------- 
+      /* #region Clock */ 
+      case 1:   // Clock
+        //unsigned long t_now = now();
+        //time_str = "12:23"; //hour(t_now);  //+ ":" + minute(t_now);
+        //date_str = "21/12/20"; //month(t_now); //+ "/" + day(t_now) + "/" + year(t_now);
+
+        display.setTextSize(3);    
+        display.setCursor(20,10);
+        display.print("12:32" );
+        display.setTextSize(1);
+        display.setCursor(35,45);
+        display.print("31/12/2020" );
+        break;
+      /* #endregion */ 
+      //-------------------------------------------------------------------------- 
+      /* #region Battery */ 
+      case 2:
+        //(x,y)   x ----->        
+        display.setTextSize(3);
+        display.setCursor(52,12);
+        display.print(batt_per);
+        display.print("%");
+        display.setTextSize(1);
+        display.setCursor(40,40);
+        display.print(batt_hours_left);
+        display.print(" hours left");
+        
+        // Battery Symbol
+        int height = map(batt_per, 0, 100, 1, 49);
+        display.drawRect(0,2,20,50,1);
+        display.fillRect(1,3+(49-height),18,height,1);        
+        display.setCursor(0,55);
+        display.print("charging");
+        //display.print("low!");
+        //display.print("charged");
+        display.setCursor(90,55);
+        display.print(batt_volt);
+        display.print(" V");
+        break;    
+        /* #endregion */ 
+    }
+    display.display();
+    display_update = false;
+  }
+   
  }
-
 // Archive --------------------------------------------------------------------------------------------------------------------
 /*
     // (ADC.read(battery)/4095)*2*3.3*1.1;
