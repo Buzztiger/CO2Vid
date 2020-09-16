@@ -128,16 +128,19 @@ String batt_status   = "unknown";  // Discharging, charging, unknown
 const int plot_minimum = 300;   //
 
 // Touch Buttons
-unsigned int touch14_raw = 0;
-unsigned int touch15_raw = 0;
+const uint8_t threshold  = 40;
+const long touchDelay    = 1000; //ms
+
 bool touch0detected      = false;
 bool touch1detected      = false;
-const uint8_t threshold  = 40;
-const long touchDelay = 1000; //ms
-int value = 0;
+bool touch2detected      = false;
 
 volatile unsigned long sinceLastTouchT0 = 0;
 volatile unsigned long sinceLastTouchT1 = 0;
+volatile unsigned long sinceLastTouchT2 = 0;
+
+#define uS_TO_S_FACTOR 1000000
+#define TIME_TO_SLEEP  10 
 
 bool touchDelayComp(unsigned long);
 
@@ -165,8 +168,8 @@ String BTStringL = "";
 String payload   = "";
 
 void IRAM_ATTR  gotTouch0(){ touch0detected = true; }
-
 void IRAM_ATTR  gotTouch1(){ touch1detected = true; }
+void IRAM_ATTR  gotTouch2(){ touch2detected = true; }
 
 bool touchDelayComp(unsigned long lastTouch)
 {
@@ -183,6 +186,14 @@ uint32_t getAbsoluteHumidity(float temperature, float humidity) {
     const float absoluteHumidity = 216.7f * ((humidity / 100.0f) * 6.112f * exp((17.62f * temperature) / (243.12f + temperature)) / (273.15f + temperature)); // [g/m^3]
     const uint32_t absoluteHumidityScaled = static_cast<uint32_t>(1000.0f * absoluteHumidity); // [mg/m^3]
     return absoluteHumidityScaled;
+}
+
+void sleepDisplay(Adafruit_SSD1306* display) {
+  display->ssd1306_command(SSD1306_DISPLAYOFF);
+}
+
+void wakeDisplay(Adafruit_SSD1306* display) {
+  display->ssd1306_command(SSD1306_DISPLAYON);
 }
 
 // Write to the SD card (DON'T MODIFY THIS FUNCTION)
@@ -247,7 +258,6 @@ void set_time(String epoch_time2){
 }
 
 void batteryCheck(){
-    
     batt_volt_old = batt_volt;        // Previous voltage    
     for (int i = 0; i < 100; i++) {// TODO is this necessary? Averaging 
         batt_raw += analogRead(A13);
@@ -308,11 +318,9 @@ void setup() {
   FastLED.setBrightness(10);
   
   // Touch Buttons
-  //touch_pad_set_voltage()
-  //touch_pad_set_voltage;
-
   touchAttachInterrupt(14, gotTouch0, threshold);
   touchAttachInterrupt(15, gotTouch1, threshold);
+  touchAttachInterrupt(12, gotTouch2, threshold);
 
   // SD Card
   // Initialize SD card
@@ -375,6 +383,9 @@ void setup() {
   Serial.print(sgp.serialnumber[1], HEX);
   Serial.println(sgp.serialnumber[2], HEX);
 
+  // Wakeup via Touch Button
+  esp_sleep_enable_touchpad_wakeup();
+  //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
 }
 
 void loop()
@@ -418,7 +429,33 @@ void loop()
       }
     }
   }
-
+  if (touch2detected){
+    touch2detected = false;
+    if (touchDelayComp(sinceLastTouchT2))
+    {
+      sinceLastTouchT2 = millis();
+      FastLED.setBrightness(0);
+      display.clearDisplay();
+      display.setTextSize(3);    
+      display.setCursor(20,10);
+      display.print("Shutdown");
+      display.display();
+      delay(1000);
+      display.print(".");
+      display.display();
+      delay(1000);
+      display.print(".");
+      display.display();
+      delay(1000);
+      display.print(".");
+      display.display();
+      delay(1000);
+      //Serial.println("sleepy time");
+      sleepDisplay(&display);      
+      delay(1000);
+      esp_deep_sleep_start();           // Power Off ESP32
+    }
+  }
   /* #region Buttons */
   /*
   touch14_raw = 0;
