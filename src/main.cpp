@@ -114,7 +114,7 @@ Adafruit_SGP30 sgp;   // TVOC Sensor
 
 // Battery 
 const float batt_max = 4.2f;
-const float batt_min = 3.7f;
+const float batt_min = 3.3f; // 3.7 nom  actual cuttoff at 3.0V, put ESP32 to deep sleep when reaching 3.3V
 int   batt_raw       = 0;
 float batt_volt      = 0;
 float batt_volt_old  = 0;
