@@ -434,9 +434,10 @@ void loop()
     if (touchDelayComp(sinceLastTouchT2))
     {
       sinceLastTouchT2 = millis();
-      FastLED.setBrightness(0);
+      FastLED.clear();
+      FastLED.show();
       display.clearDisplay();
-      display.setTextSize(3);    
+      display.setTextSize(1);    
       display.setCursor(20,10);
       display.print("Shutdown");
       display.display();
@@ -450,10 +451,11 @@ void loop()
       display.print(".");
       display.display();
       delay(1000);
-      //Serial.println("sleepy time");
-      sleepDisplay(&display);      
+      sleepDisplay(&display);
       delay(1000);
       esp_deep_sleep_start();           // Power Off ESP32
+      //wakeDisplay(&display);
+      //esp_deep_sleep_start();           // Power Off ESP32
     }
   }
   /* #region Buttons */
@@ -604,8 +606,9 @@ void loop()
       }      
     }    
   }
-  
-  // Air Sensors
+
+   //----------------------------------------------------------------------------------------------------------------------------------------------------   
+   /* #region Air Sensors */
   if (airSensor.dataAvailable())
   {
     current_CO2     = airSensor.getCO2();
@@ -730,14 +733,15 @@ void loop()
   }
 
   }
-  
+  /* #endregion */
+
   // Display [clock] [battery] [CO2] []
   if(display_update){
     display.clearDisplay();
     switch (display_mode){
-      //-------------------------------------------------------------------------- 
+      //-------------------------------------------------------------------------------------------------------------------------------------------------
       /* #region CO2 */
-      case 0:     
+      case 0: {  
         display.setTextSize(3);    
         if(alert){
           display.setCursor(7,40); // Adjust this location depending on above or below 1000 TODO
@@ -809,8 +813,9 @@ void loop()
           }
         }          
         break;
+      }
         /* #endregion */
-      //-------------------------------------------------------------------------- 
+      //-------------------------------------------------------------------------------------------------------------------------------------------------
       /* #region Clock */ 
       case 1:   // Clock
         //unsigned long t_now = now();
@@ -825,9 +830,9 @@ void loop()
         display.print("31/12/2020" );
         break;
       /* #endregion */ 
-      //-------------------------------------------------------------------------- 
+      //-------------------------------------------------------------------------------------------------------------------------------------------------
       /* #region Battery */ 
-      case 2:
+      case 2:{
         //(x,y)   x ----->        
         display.setTextSize(3);
         display.setCursor(52,12);
@@ -850,7 +855,15 @@ void loop()
         display.print(batt_volt);
         display.print(" V");
         break;    
-        /* #endregion */ 
+      }        
+        /* #endregion */
+      /* #region Calibration */ 
+      case 3:{
+        break;
+      }
+        // Total days
+        // Fresh air last 24 hrs 
+      /* #endregion */
     }
     display.display();
     display_update = false;
