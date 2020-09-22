@@ -3,6 +3,7 @@
 
 #include <sys/time.h>
 #include <TimeLib.h>
+#include <LinearRegression.h>
 
 //#include <time.h>
 
@@ -123,6 +124,9 @@ int batt_timer       = 0;
 int batt_hours_left  = 1;
 bool  batt_low       = false;
 String batt_status   = "unknown";  // Discharging, charging, unknown
+int time_remaining   = 0;
+LinearRegression lr  = LinearRegression();
+double values[2];
 
 #define fan_pin 1          // Fan PIN -> transistor 5V line to fan
 const int plot_minimum = 300;   //
@@ -154,6 +158,9 @@ int array_counter = 0;           //
 int plot[128];            // 2m plot    
 int plot_1h[128];         // 1h plot  7200  points (@2s intervall) -> 56 points  = 1px
 int plot_6h[128];         // 6h plot  43200 points (@2s intervall) -> 337 points = 1px
+int plot_batt[128];       // battery voltage plot
+int counter_batt = 0;     // battery voltage plot index counter
+
 int counter_6h = 0;       //337
 unsigned long sum_6h  = 0;
 int counter_1h = 0;       //56
@@ -266,26 +273,45 @@ void batteryCheck(){
     batt_raw  = batt_raw / 100;
     //batt_raw  = analogRead(A13);
     batt_volt = (batt_raw + 142.7f)/635.44f;
-    batt_volt = roundf(batt_volt * 100) / 100; // rounding
-    
-    batt_per = ((batt_volt - batt_min) / (batt_max - batt_min)) * 100;
+    batt_volt = roundf(batt_volt * 100) / 100; // rounding    
+    batt_per  = ((batt_volt - batt_min) / (batt_max - batt_min)) * 100;
     if (batt_per > 100) {
       batt_per= 100;
     }
     if (batt_per < 0) {
       batt_per= 0;
     }
-    /*
-    Serial.print("Raw: ");
-    Serial.println(batt_raw, 2);
-    Serial.print("Volt: ");
-    Serial.println(batt_volt, 2);
-    Serial.print("Percent: ");
-    Serial.println(batt_per, 2);
-    */
-    // Check if charging
-    // Calc remaining time
 
+    // Check if charging measure over a minute
+    if (plot_batt[121] > 0 ){   // Do we have enough datapoints ?
+      
+      if (batt_volt > plot_batt[121]){
+        batt_status = "charging";
+      }else{
+        batt_status = "discharging";
+      }
+      // Calc remaining time
+      lr.learn(1,batt_volt);
+      lr.learn(2,plot_batt[127]);
+      lr.learn(3,plot_batt[126]);
+      lr.learn(4,plot_batt[125]);
+      lr.learn(5,plot_batt[124]);
+      lr.learn(6,plot_batt[123]);
+      lr.learn(7,plot_batt[122]);
+      lr.learn(8,plot_batt[121]);
+          
+      Serial.print("Values: ");
+      lr.parameters(values);
+      Serial.print("Volt = ");
+      Serial.print(values[0]);
+      Serial.print("*time + ");
+      Serial.println(values[1]); 
+      time_remaining =  (batt_max - 4.09f)/(-0.01f); // x = time , y = voltage
+      // (batt_max - 4.09f)/(-0.01) = time
+      // charging
+    }else{
+        batt_status = "unknown";
+    }  
 }
     
 void setLED(float CO2){
@@ -351,9 +377,10 @@ void setup() {
 
   // Init plot arrays
   for (byte i = 0; i < array_length; i = i + 1) {                
-      plot[i]    = plot_minimum;
-      plot_1h[i] = plot_minimum;
-      plot_6h[i] = plot_minimum;
+      plot[i]      = plot_minimum;
+      plot_1h[i]   = plot_minimum;
+      plot_6h[i]   = plot_minimum;
+      plot_batt[i] = 0;
   }  
   // Show initial display buffer contents on the screen --
   // the library initializes this with an Adafruit splash screen. TODO change this to CO2VID Logo
@@ -395,6 +422,10 @@ void loop()
   if ( (millis() - batt_timer) > 5000){
     batt_timer = millis();
     batteryCheck();
+    
+    // Update array    
+    memcpy(plot_batt, &plot_batt[1], sizeof(plot_batt) - sizeof(int));  // Shift datapoints one down    
+    plot_batt[127] = batt_volt;                                         // Add new datapoint
     display_update = true;
   }
 
@@ -438,7 +469,7 @@ void loop()
       FastLED.show();
       display.clearDisplay();
       display.setTextSize(1);    
-      display.setCursor(20,10);
+      display.setCursor(40,10);
       display.print("Shutdown");
       display.display();
       delay(1000);
@@ -840,7 +871,7 @@ void loop()
         display.print("%");
         display.setTextSize(1);
         display.setCursor(40,40);
-        display.print(batt_hours_left);
+        display.print(time_remaining);
         display.print(" hours left");
         
         // Battery Symbol

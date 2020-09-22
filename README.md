@@ -15,4 +15,8 @@ PIN Connections
 ==========================================
 NeoPixel In to ESP32 
 
+Licence Tracker TODO
+==========================================
 
+https://github.com/cubiwan/Regressino   GPL-3.0 License
+FastLed                                 MIT License
